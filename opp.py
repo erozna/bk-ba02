@@ -7,7 +7,15 @@ import pandas as pd
 st.set_page_config(page_title="바카라 전략 분석기 Pro", layout="wide")
 st.title("📊 바카라 13종 전략 통합 시뮬레이터")
 
-# 2. 사이드바 및 시뮬레이션 로직 (기존 유지)
+with st.expander("💡 사용법 및 전략 설명"):
+    st.markdown("""
+    * **타이 표시:** 출목표의 원 위에 녹색 사선과 숫자로 표시됩니다.
+    * **밑줄 따라가기:** 직전 결과(타이 제외)와 동일한 곳에 베팅합니다.
+    * **전전 결과 따라가기:** 두 판 전 결과(타이 제외)와 동일하게 베팅합니다.
+    * **뱅커식스(B6):** 뱅커가 6으로 이기면 수익의 50%만 지급합니다.
+    """)
+
+# 2. 사이드바 설정
 st.sidebar.header("🕹️ 공통 설정")
 num_games = st.sidebar.slider("생성할 판 수", 30, 200, 72)
 unit_bet_input = st.sidebar.number_input("기본 베팅액 (만원)", 1, 30, 1)
@@ -15,6 +23,7 @@ unit_bet = unit_bet_input * 10000
 max_steps = st.sidebar.slider("시스템 최대 단계", 2, 4, 3)
 MAX_LIMIT = 500000 
 
+# 시뮬레이션 엔진 함수 (13종 전략 공통)
 def run_simulation(results_raw, b6_flags, pos_type, sys_type):
     balance = 0
     current_step = 1
@@ -26,7 +35,7 @@ def run_simulation(results_raw, b6_flags, pos_type, sys_type):
         actual = results_raw[i]
         b6_event = b6_flags[i]
         
-        # [포지션 및 베팅 로직 생략 - 이전과 동일]
+        # [포지션 로직]
         bet_on = None
         if pos_type == "플레이어에만 베팅": bet_on = "P"
         elif pos_type == "뱅커에만 베팅": bet_on = "B"
@@ -36,17 +45,21 @@ def run_simulation(results_raw, b6_flags, pos_type, sys_type):
             if len(pure_results) >= 1: bet_on = "B" if pure_results[-1] == "P" else "P"
             else: bet_on = "P"
 
+        # [베팅 금액 로직]
         if sys_type == "고정 베팅": bet_amount = unit_bet
         else: bet_amount = unit_bet * (2 ** (current_step - 1))
         if bet_amount > MAX_LIMIT: bet_amount = unit_bet 
 
-        pnl = 0
-        note = ""
+        # [수익 판정]
+        pnl, note = 0, ""
         if actual == 'T': 
             pnl = 0 
         else:
             if bet_on == actual:
-                pnl = bet_amount * 0.5 if (bet_on == 'B' and b6_event) else bet_amount
+                if bet_on == 'B' and b6_event:
+                    pnl = bet_amount * 0.5
+                    note = "B6 당첨(50%)"
+                else: pnl = bet_amount
                 current_step = 1 
             else:
                 pnl = -bet_amount
@@ -56,13 +69,17 @@ def run_simulation(results_raw, b6_flags, pos_type, sys_type):
         
         balance += pnl
         balance_history.append(balance)
-        detailed_logs.append({"판": i+1, "결과": actual, "베팅": bet_on, "금액": f"{int(bet_amount):,}원", "수익": f"{int(pnl):,}원", "누적": f"{int(balance):,}원", "비고": note})
+        detailed_logs.append({
+            "판": i+1, "결과": actual, "베팅": bet_on, 
+            "금액": f"{int(bet_amount):,}원", "수익": f"{int(pnl):,}원", 
+            "누적": f"{int(balance):,}원", "비고": note
+        })
         
     return int(balance), balance_history, detailed_logs
 
+# 3. 데이터 생성 및 시뮬레이션 실행 (세션 상태 저장)
 if st.sidebar.button("전체 시뮬레이션 실행"):
-    results_raw = []
-    b6_flags = []
+    results_raw, b6_flags = [], []
     for _ in range(num_games):
         res = random.choices(['B', 'P', 'T'], weights=[45.8, 44.6, 9.6], k=1)[0]
         results_raw.append(res)
@@ -72,6 +89,7 @@ if st.sidebar.button("전체 시뮬레이션 실행"):
     sys_strategies = ["고정 베팅", "마틴게일", "역마틴게일"]
     
     summary_data, all_histories, all_logs = [], {}, {}
+
     for pos in pos_strategies:
         for sys in sys_strategies:
             final_profit, history, logs = run_simulation(results_raw, b6_flags, pos, sys)
@@ -80,59 +98,14 @@ if st.sidebar.button("전체 시뮬레이션 실행"):
             all_histories[strategy_name] = history
             all_logs[strategy_name] = logs
 
-    st.session_state.update({'results_raw': results_raw, 'b6_flags': b6_flags, 'summary_data': summary_data, 'all_histories': all_histories, 'all_logs': all_logs})
+    st.session_state.update({
+        'results_raw': results_raw, 'b6_flags': b6_flags,
+        'summary_data': summary_data, 'all_histories': all_histories, 'all_logs': all_logs
+    })
 
-# 3. 화면 출력부
+# 4. 화면 출력부
 if 'results_raw' in st.session_state:
-    # 통계 카드 (생략 - 이전과 동일)
-    
-    # --- [수정된 출목표 로직] ---
-    st.subheader("🔵 이번 슈의 결과 (출목표 - 타이 포함)")
-    
-    x, y, colors, types, tie_counts = [], [], [], [], []
-    curr_x, curr_y = 0, 0
-    prev_r = None
-    
-    # 데이터를 순회하며 좌표와 타이 횟수 계산
-    for res in st.session_state['results_raw']:
-        if res == 'T':
-            if len(tie_counts) > 0:
-                tie_counts[-1] += 1 # 직전 결과에 타이 횟수 추가
-            continue
-        
-        if prev_r and res != prev_r:
-            curr_x += 1
-            curr_y = 0
-        elif prev_r and res == prev_r:
-            curr_y += 1
-            if curr_y >= 6:
-                curr_y = 5
-                curr_x += 1
-        
-        x.append(curr_x)
-        y.append(curr_y)
-        colors.append('red' if res == 'B' else 'blue')
-        types.append(res)
-        tie_counts.append(0) # 새로운 결과가 나올 때 타이 횟수 0으로 시작
-        prev_r = res
-
-    fig, ax = plt.subplots(figsize=(12, 2.5))
-    for i in range(len(x)):
-        # 메인 원 (P/B)
-        circle = plt.Circle((x[i], 5-y[i]), 0.35, color=colors[i], fill=False, lw=2)
-        ax.add_patch(circle)
-        ax.text(x[i], 5-y[i], types[i], color=colors[i], ha='center', va='center', fontsize=7, fontweight='bold')
-        
-        # 타이 표시 (숫자가 있으면 녹색으로 표시)
-        if tie_counts[i] > 0:
-            ax.text(x[i]+0.25, 5-y[i]+0.25, str(tie_counts[i]), color='green', fontsize=8, fontweight='bold')
-            # 타이가 있음을 알리는 녹색 사선 효과 (선택사항)
-            ax.plot([x[i]-0.2, x[i]+0.2], [5-y[i]-0.2, 5-y[i]+0.2], color='green', lw=1.5)
-
-    ax.set_xlim(-0.5, max(x)+1 if x else 10)
-    ax.set_ylim(-0.5, 5.5)
-    ax.set_aspect('equal')
-    plt.axis('off')
-    st.pyplot(fig)
-    
-    # [순위 테이블 및 차트 생략 - 이전과 동일]
+    # 4-1. 통계 카드
+    res_list, b6_list = st.session_state['results_raw'], st.session_state['b6_flags']
+    total = len(res_list)
+    b, p, t, b6 = res_list.count('B'), res_list.count('P'), res
