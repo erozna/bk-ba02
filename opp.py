@@ -110,4 +110,62 @@ if st.sidebar.button("전체 시뮬레이션 실행"):
     st.session_state['b6_flags'] = b6_flags
     st.session_state['summary_data'] = summary_data
     st.session_state['all_histories'] = all_histories
-    st.session_state['all_logs'] = all_
+    st.session_state['all_logs'] = all_logs
+
+# 4. 화면 출력부
+if 'results_raw' in st.session_state:
+    # 4-1. 통계 정보 계산
+    res_list = st.session_state['results_raw']
+    b6_list = st.session_state['b6_flags']
+    total = len(res_list)
+    b_count = res_list.count('B')
+    p_count = res_list.count('P')
+    t_count = res_list.count('T')
+    b6_count = sum(b6_list)
+
+    st.subheader("📊 이번 슈 출현 통계")
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("뱅커(B)", f"{b_count}회", f"{(b_count/total)*100:.1f}%")
+    col2.metric("플레이어(P)", f"{p_count}회", f"{(p_count/total)*100:.1f}%")
+    col3.metric("타이(T)", f"{t_count}회", f"{(t_count/total)*100:.1f}%")
+    col4.metric("뱅커식스(B6)", f"{b6_count}회", f"{(b6_count/total)*100:.1f}%", delta_color="inverse")
+
+    # 4-2. 출목표 그래프
+    st.subheader("🔵 이번 슈의 결과 (출목표)")
+    x, y, colors, types, curr_x, curr_y, prev_r = [], [], [], [], 0, 0, None
+    for idx, res in enumerate([r for r in res_list if r != 'T']):
+        if prev_r and res != prev_r: curr_x += 1; curr_y = 0
+        elif prev_r and res == prev_r: 
+            curr_y += 1
+            if curr_y >= 6: curr_y = 5; curr_x += 1
+        x.append(curr_x); y.append(curr_y); colors.append('red' if res == 'B' else 'blue'); types.append(res); prev_r = res
+    fig, ax = plt.subplots(figsize=(12, 2))
+    for i in range(len(x)):
+        ax.add_patch(plt.Circle((x[i], 5-y[i]), 0.35, color=colors[i], fill=False, lw=2))
+        ax.text(x[i], 5-y[i], types[i], color=colors[i], ha='center', va='center', fontsize=7, fontweight='bold')
+    ax.set_xlim(-0.5, max(x)+1 if x else 10); ax.set_ylim(-0.5, 5.5); ax.set_aspect('equal'); plt.axis('off')
+    st.pyplot(fig)
+
+    # 4-3. 순위 테이블
+    st.subheader("🏆 전략별 수익 순위")
+    df_summary = pd.DataFrame(st.session_state['summary_data']).sort_values(by="최종 수익(원)", ascending=False).reset_index(drop=True)
+    df_summary.index = df_summary.index + 1
+    
+    def style_profit(val):
+        color = '#FF0000' if val > 0 else '#1976D2'
+        return f'color: {color}; font-weight: 900; font-size: 16px'
+
+    st.dataframe(df_summary.style.applymap(style_profit, subset=['최종 수익(원)']).format({'최종 수익(원)': '{:,.0f}원'}), use_container_width=True)
+
+    # 4-4. 누적 차트
+    st.subheader("📈 전략별 누적 수익 비교")
+    st.line_chart(pd.DataFrame(st.session_state['all_histories']))
+
+    # 4-5. 상세 정보 조회
+    st.divider()
+    st.subheader("🔍 전략별 상세 베팅 내역")
+    selected_strategy = st.selectbox("상세 정보를 볼 전략을 선택하세요:", list(st.session_state['all_logs'].keys()))
+    
+    if selected_strategy:
+        st.write(f"**[{selected_strategy}]** 상세 기록")
+        st.table(pd.DataFrame(st.session_state['all_logs'][selected_strategy]))
